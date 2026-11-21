@@ -1,51 +1,51 @@
-split,query,required
-development,Quote SK-40A,catalog/SK-40A
-development,Price on sk-40a,catalog/SK-40A
-evaluation,Ship 3 SK-40A today,catalog/SK-40A
-evaluation,Stock for SK40A?,catalog/SK-40A
-evaluation,Please supply SK-40A kits,catalog/SK-40A
-evaluation,Need seal kit type A,catalog/SK-40A
-development,Seal for PX-40 revision A,parts/SK-40A
-development,PX40 rev A seal,parts/SK-40A
-evaluation,Mechanical seal kit for PX40 revision A,parts/SK-40A
-evaluation,Which kit fits revision A?,parts/SK-40A
-evaluation,Pump overhaul: PX-40 rev. A,parts/SK-40A
-development,PX-40 pump seal serial 18B015,bulletin/SB-040 parts/SK-40A
-development,Check serial number 18B015 for kit,bulletin/SB-040 parts/SK-40A
-evaluation,"Pump plate 18B015, send seal",bulletin/SB-040 parts/SK-40A
-evaluation,Two replacement kits for PX40 18B015,bulletin/SB-040 parts/SK-40A
-evaluation,Need mechanical seal. Serial 18B015,bulletin/SB-040 parts/SK-40A
-development,Quote SK-40B,catalog/SK-40B
-development,Price on sk-40b,catalog/SK-40B
-evaluation,Ship 3 SK-40B today,catalog/SK-40B
-evaluation,Stock for SK40B?,catalog/SK-40B
-evaluation,Please supply SK-40B kits,catalog/SK-40B
-evaluation,Need seal kit type B,catalog/SK-40B
-development,Seal for PX-40 revision B,parts/SK-40B
-development,PX40 rev B seal,parts/SK-40B
-evaluation,Mechanical seal kit for PX40 revision B,parts/SK-40B
-evaluation,Which kit fits revision B?,parts/SK-40B
-evaluation,Pump overhaul: PX-40 rev. B,parts/SK-40B
-development,PX-40 pump seal serial 18B086,bulletin/SB-040 parts/SK-40B
-development,Check serial number 18B086 for kit,bulletin/SB-040 parts/SK-40B
-evaluation,"Pump plate 18B086, send seal",bulletin/SB-040 parts/SK-40B
-evaluation,Two replacement kits for PX40 18B086,bulletin/SB-040 parts/SK-40B
-evaluation,Need mechanical seal. Serial 18B086,bulletin/SB-040 parts/SK-40B
-development,PX-40 seal kit,parts/SK-40A parts/SK-40B
-development,PX40 mechanical seal,parts/SK-40A parts/SK-40B
-evaluation,Need two seal kits for PX-40,parts/SK-40A parts/SK-40B
-evaluation,Which variants fit the PX40 pump?,parts/SK-40A parts/SK-40B
-evaluation,"Replacement mechanical seal kit, revision unknown",parts/SK-40A parts/SK-40B
-evaluation,Please quote PX-40 seal kit options,parts/SK-40A parts/SK-40B
-development,Send bulletin SB-040,bulletin/SB-040
-development,Pump serial range rules,bulletin/SB-040
-evaluation,Which serial ranges does SB040 cover?,bulletin/SB-040
-evaluation,Look up prefix 18B,bulletin/SB-040
-evaluation,What is the first serial for revision B?,bulletin/SB-040
-evaluation,Check the service bulletin,bulletin/SB-040
-development,Motor winding quote,
-development,Office supplies,
-evaluation,Oil filter for forklift,
-evaluation,Invoice payment overdue,
-evaluation,Ship packing tape,
-evaluation,Need a gearbox bearing,
+split,query,required,decision
+development,Quote SK-40A,catalog/SK-40A,SK-40A
+development,Price on sk-40a,catalog/SK-40A,SK-40A
+evaluation,Ship 3 SK-40A today,catalog/SK-40A,SK-40A
+evaluation,Stock for SK40A?,catalog/SK-40A,SK-40A
+evaluation,Please supply SK-40A kits,catalog/SK-40A,SK-40A
+evaluation,Need seal kit type A,catalog/SK-40A,review
+development,Seal for PX-40 revision A,parts/SK-40A,SK-40A
+development,PX40 rev A seal,parts/SK-40A,SK-40A
+evaluation,Mechanical seal kit for PX40 revision A,parts/SK-40A,SK-40A
+evaluation,Which kit fits revision A?,parts/SK-40A,review
+evaluation,Pump overhaul: PX-40 rev. A,parts/SK-40A,SK-40A
+development,PX-40 pump seal serial 18B015,bulletin/SB-040 parts/SK-40A,SK-40A
+development,Check serial number 18B015 for kit,bulletin/SB-040 parts/SK-40A,SK-40A
+evaluation,"Pump plate 18B015, send seal",bulletin/SB-040 parts/SK-40A,SK-40A
+evaluation,Two replacement kits for PX40 18B015,bulletin/SB-040 parts/SK-40A,SK-40A
+evaluation,Need mechanical seal. Serial 18B015,bulletin/SB-040 parts/SK-40A,SK-40A
+development,Quote SK-40B,catalog/SK-40B,SK-40B
+development,Price on sk-40b,catalog/SK-40B,SK-40B
+evaluation,Ship 3 SK-40B today,catalog/SK-40B,SK-40B
+evaluation,Stock for SK40B?,catalog/SK-40B,SK-40B
+evaluation,Please supply SK-40B kits,catalog/SK-40B,SK-40B
+evaluation,Need seal kit type B,catalog/SK-40B,review
+development,Seal for PX-40 revision B,parts/SK-40B,SK-40B
+development,PX40 rev B seal,parts/SK-40B,SK-40B
+evaluation,Mechanical seal kit for PX40 revision B,parts/SK-40B,SK-40B
+evaluation,Which kit fits revision B?,parts/SK-40B,review
+evaluation,Pump overhaul: PX-40 rev. B,parts/SK-40B,SK-40B
+development,PX-40 pump seal serial 18B086,bulletin/SB-040 parts/SK-40B,SK-40B
+development,Check serial number 18B086 for kit,bulletin/SB-040 parts/SK-40B,SK-40B
+evaluation,"Pump plate 18B086, send seal",bulletin/SB-040 parts/SK-40B,SK-40B
+evaluation,Two replacement kits for PX40 18B086,bulletin/SB-040 parts/SK-40B,SK-40B
+evaluation,Need mechanical seal. Serial 18B086,bulletin/SB-040 parts/SK-40B,SK-40B
+development,PX-40 seal kit,parts/SK-40A parts/SK-40B,review
+development,PX40 mechanical seal,parts/SK-40A parts/SK-40B,review
+evaluation,Need two seal kits for PX-40,parts/SK-40A parts/SK-40B,review
+evaluation,Which variants fit the PX40 pump?,parts/SK-40A parts/SK-40B,review
+evaluation,"Replacement mechanical seal kit, revision unknown",parts/SK-40A parts/SK-40B,review
+evaluation,Please quote PX-40 seal kit options,parts/SK-40A parts/SK-40B,review
+development,Send bulletin SB-040,bulletin/SB-040,reference
+development,Pump serial range rules,bulletin/SB-040,reference
+evaluation,Which serial ranges does SB040 cover?,bulletin/SB-040,reference
+evaluation,Look up prefix 18B,bulletin/SB-040,reference
+evaluation,What is the first serial for revision B?,bulletin/SB-040,reference
+evaluation,Check the service bulletin,bulletin/SB-040,reference
+development,Motor winding quote,,review
+development,Office supplies,,review
+evaluation,Oil filter for forklift,,review
+evaluation,Invoice payment overdue,,review
+evaluation,Ship packing tape,,review
+evaluation,Need a gearbox bearing,,review
