@@ -33,3 +33,26 @@ class DemoPrivacyTests(unittest.TestCase):
         history = b.get(url + "/history")
         self.assertEqual(len(history.json()), 1)
         self.assertIn("no-store", history.headers["cache-control"])
+
+    def test_px60_sample_requires_serial_and_approval_before_export(self):
+        folder = self.enterContext(tempfile.TemporaryDirectory())
+        app = create_app(Path(folder) / "demo.sqlite3", demo=True)
+        client = self.enterContext(TestClient(app, base_url="https://demo.test"))
+        pdf = client.get("/samples/PO-1003")
+        self.assertEqual(pdf.status_code, 200)
+        draft = client.post("/orders", files={"file": ("sample.pdf", pdf.content)})
+        self.assertEqual(draft.status_code, 201)
+        self.assertEqual(draft.json()["status"], "needs_clarification")
+        self.assertIsNone(draft.json()["match"]["part_code"])
+        self.assertIn("serial number or revision", draft.json()["match"]["reason"])
+        url = "/orders/PO-1003"
+        self.assertEqual(client.post(url + "/approval", json={"version": 1}).status_code, 409)
+        self.assertEqual(len(client.get(url + "/export").text.splitlines()), 1)
+        self.assertEqual(client.patch(url + "/clarification",
+                         json={"version": 1, "serial": "18B042"}).status_code, 422)
+        revised = client.patch(url + "/clarification", json={"version": 1, "serial": "26T250"})
+        self.assertEqual(revised.json()["match"]["part_code"], "SK-60B")
+        self.assertEqual(revised.json()["status"], "awaiting_review")
+        self.assertEqual(len(client.get(url + "/export").text.splitlines()), 1)
+        self.assertEqual(client.post(url + "/approval", json={"version": 2}).status_code, 200)
+        self.assertEqual(client.get(url + "/export").text.splitlines()[1:], ["PO-1003,1,SK-60B,2,KIT"])

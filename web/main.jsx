@@ -112,7 +112,7 @@ function App() {
       const pending = order.status === "needs_clarification";
       const value = identifier.trim();
       const payload = {version:order.version};
-      if (pending) payload[/^[ab]$/i.test(value) ? "revision" : "serial"] = value;
+      if (pending) payload[/^[a-z]$/i.test(value) ? "revision" : "serial"] = value;
       const response = await request(orderUrl + (pending ? "/clarification" : "/approval"), {
         method:pending ? "PATCH":"POST", headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)
       });
@@ -129,7 +129,7 @@ function App() {
   return <><header><div className="bar"><b>OrderProof</b><span>Order review</span></div></header>
     <main><nav aria-label="Order selection">
       <label>Order review <select aria-label="Open a sample order" disabled={busy} value="" onChange={e=>run(()=>openSample(e.target.value))}>
-        <option value="">Open sample…</option><option>PO-1001</option><option>PO-1002</option></select></label>
+        <option value="">Open sample…</option><option>PO-1001</option><option>PO-1002</option><option value="PO-1003">PO-1003 · PX-60</option></select></label>
       {demo === false && <button className="secondary" disabled={busy} onClick={()=>input.current.click()}>Upload PDF</button>}
       <input ref={input} type="file" accept="application/pdf" hidden onChange={e=>{
         const file=e.target.files[0]; e.target.value=""; if(file) run(async()=>{

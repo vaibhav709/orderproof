@@ -182,9 +182,6 @@ def create_app(database: Path | str, *, demo: bool | None = None) -> FastAPI:
     def clarify(order_id: str, change: Clarification):
         updates = {key: value.strip().upper() for key, value in
                    change.model_dump(exclude={"version"}, exclude_none=True).items()}
-        if demo and any(not re.fullmatch(r"18B[0-9]{3}" if key == "serial" else r"[AB]", value)
-                        for key, value in updates.items()):
-            raise HTTPException(422, "Use a fictional 18B serial or revision A or B.")
         if not updates or not all(updates.values()):
             raise HTTPException(422, "Supply a serial number or revision.")
         with transaction(database, write=True) as db:
@@ -192,6 +189,14 @@ def create_app(database: Path | str, *, demo: bool | None = None) -> FastAPI:
             check_version(document, change.version)
             if document["status"] == "approved":
                 raise HTTPException(409, "This order is already approved.")
+            if demo:
+                rules = [r for r in catalog_rows("serial_ranges") if r["pump_model"] == document["model"]]
+                revisions = {r["pump_revision"] for r in rules}
+                patterns = {re.escape(r["prefix"]) + r"[0-9]{%d}" % len(r["first_suffix"])
+                            for r in rules}
+                if ("revision" in updates and updates["revision"] not in revisions
+                        or "serial" in updates and not any(re.fullmatch(p, updates["serial"]) for p in patterns)):
+                    raise HTTPException(422, "Use a fictional serial or revision for this pump model.")
             document = advance(db, document, {"action": "clarify", "updates": updates})
             return save_review(db, document, "clarified")
 
@@ -237,7 +242,7 @@ def create_app(database: Path | str, *, demo: bool | None = None) -> FastAPI:
 
     @app.get("/samples/{sample_id}")
     def sample(sample_id: str):
-        if sample_id not in {"PO-1001", "PO-1002"}:
+        if sample_id not in {"PO-1001", "PO-1002", "PO-1003"}:
             raise HTTPException(404, "Sample unavailable.")
         return FileResponse(Path(__file__).parent / "orders" / f"{sample_id}.pdf",
                             media_type="application/pdf",
