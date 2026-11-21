@@ -31,7 +31,7 @@ if __name__ == "__main__":
         cases = list(csv.DictReader(source))
     records = supplier_records()
     for split in ["development", "evaluation"]:
-        for method in ["exact", "lexical"]:
+        for method in ["exact", "lexical", "serial-aware"]:
             result, misses = evaluate([c for c in cases if c["split"] == split], records, method)
             print(split, method, result)
             if misses:

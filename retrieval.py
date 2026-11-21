@@ -5,7 +5,7 @@ import re
 from collections import Counter
 from dataclasses import dataclass
 
-from matching import SUPPLIER, read_rows
+from matching import SUPPLIER, read_rows, resolve_kit
 
 
 @dataclass(frozen=True)
@@ -30,7 +30,34 @@ def tokens(text):
     return [word.replace("-", "") for word in words]
 
 
-def shortlist(query, records, method="lexical", limit=3):
+def serial_evidence(query, records):
+    """Rank evidence from the demo bulletin when a buyer quotes an 18B serial."""
+    serials = set(re.findall(r"\b18B[0-9]{3}\b", query.upper()))
+    if not serials:
+        return None
+    by_key = {r.key: r for r in records}
+    bulletin = by_key.get("bulletin/SB-040")
+    if bulletin is None:
+        return []
+    evidence = [bulletin]
+    models = set(re.findall(r"\bPX-?([0-9]+)\b", query.upper()))
+    revisions = set(re.findall(r"\bREV(?:ISION)?[. :_-]+([A-Z0-9]+)\b", query.upper()))
+    if len(serials) != 1 or models - {"40"} or len(revisions) > 1:
+        return evidence
+    match = resolve_kit("PX-40", serials.pop(), next(iter(revisions), ""))
+    if match.part_code:
+        for key in ["parts/" + match.part_code, "catalog/" + match.part_code]:
+            if key in by_key:
+                evidence.append(by_key[key])
+    return evidence
+
+
+def shortlist(query, records, method="serial-aware", limit=3):
+    if method == "serial-aware":
+        evidence = serial_evidence(query, records)
+        if evidence is not None:
+            return evidence[:limit]
+        method = "lexical"
     words = set(tokens(query))
     if method == "exact":
         hits = [r for r in records if tokens(r.key.split("/")[1])[0] in words]
