@@ -7,6 +7,8 @@ from pathlib import Path
 
 def configured_database():
     url = os.environ.get("ORDERPROOF_DATABASE_URL")
+    if not url and os.environ.get("VERCEL"):
+        url = os.environ.get("DATABASE_URL")
     if url:
         if not url.startswith(("postgresql://", "postgres://")):
             raise ValueError("ORDERPROOF_DATABASE_URL must be a PostgreSQL connection URL")
