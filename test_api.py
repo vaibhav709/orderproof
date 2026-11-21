@@ -42,3 +42,31 @@ class UploadTests(unittest.TestCase):
         self.assertEqual(self.upload(b"not a PDF").status_code, 422)
         self.assertEqual(self.upload(b"%PDF-broken").status_code, 422)
         self.assertEqual(self.client.get("/orders/missing").status_code, 404)
+
+    def test_clarification_then_approval(self):
+        self.upload((ORDERS / "PO-1002.pdf").read_bytes())
+        url = "/orders/PO-1002"
+        def approve(version):
+            return self.client.post(url + "/approval", json={"version": version})
+        self.assertEqual(approve(1).status_code, 409)
+        result = self.client.patch(url + "/clarification", json={"version": 1, "serial": "18B042"})
+        self.assertEqual(result.status_code, 200)
+        draft = result.json()
+        self.assertEqual(draft["original_evidence"]["serial"], "")
+        self.assertEqual(draft["match"]["part_code"], "SK-40B")
+        self.assertEqual(draft["status"], "awaiting_review")
+        self.assertEqual(approve(1).status_code, 409)
+        approved = approve(draft["version"]).json()
+        self.assertEqual(approved["status"], "approved")
+        self.assertEqual(approve(draft["version"]).json(), approved)
+        self.assertEqual(self.client.get(url).json(), approved)
+        self.assertEqual(self.client.patch(url + "/clarification",
+                         json={"version": approved["version"], "revision": "A"}).status_code, 409)
+
+    def test_conflicting_revision_blocks_approval(self):
+        self.upload((ORDERS / "PO-1001.pdf").read_bytes())
+        url = "/orders/PO-1001"
+        draft = self.client.patch(url + "/clarification", json={"version": 1, "revision": "A"}).json()
+        self.assertEqual(draft["status"], "needs_clarification")
+        self.assertEqual(draft["serial"], "18B042")
+        self.assertEqual(self.client.post(url + "/approval", json={"version": 2}).status_code, 409)
