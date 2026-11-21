@@ -41,10 +41,18 @@ def load_order(db, order_id):
     return document
 
 
-def save_review(db, document):
+def record_event(db, document, action):
+    state = {key: document[key] for key in ("status", "serial", "revision", "match")}
+    db.execute("""INSERT INTO review_history (order_id, version, action, state)
+                  VALUES (?, ?, ?, ?)""",
+               (document["order_id"], document["version"], action, json.dumps(state)))
+
+
+def save_review(db, document, action):
     document["version"] += 1
     db.execute("UPDATE drafts SET document = ? WHERE order_id = ?",
                (json.dumps(document), document["order_id"]))
+    record_event(db, document, action)
     return document
 
 
@@ -62,6 +70,18 @@ def create_app(database: Path) -> FastAPI:
                 fingerprint TEXT NOT NULL UNIQUE,
                 document TEXT NOT NULL
             )""")
+            db.execute("BEGIN IMMEDIATE")
+            db.execute("""CREATE TABLE IF NOT EXISTS review_history (
+                order_id TEXT COLLATE NOCASE NOT NULL,
+                version INTEGER NOT NULL,
+                action TEXT NOT NULL,
+                recorded_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                state TEXT NOT NULL,
+                PRIMARY KEY (order_id, version)
+            )""")
+            for order_id, in db.execute("""SELECT order_id FROM drafts d WHERE NOT EXISTS
+                    (SELECT 1 FROM review_history h WHERE h.order_id = d.order_id)"""):
+                record_event(db, load_order(db, order_id), "existing_draft")
         yield
 
     app = FastAPI(title="OrderProof", lifespan=lifespan)
@@ -95,6 +115,7 @@ def create_app(database: Path) -> FastAPI:
                 (draft.order_id, fingerprint, json.dumps(result)),
             )
             if inserted.rowcount:
+                record_event(db, result, "uploaded")
                 return result
             # Another request may have inserted the same upload while we parsed it.
             existing = previous_upload()
@@ -107,6 +128,15 @@ def create_app(database: Path) -> FastAPI:
     def get_order(order_id: str):
         with closing(sqlite3.connect(database)) as db:
             return load_order(db, order_id)
+
+    @app.get("/orders/{order_id}/history")
+    def history(order_id: str):
+        with closing(sqlite3.connect(database)) as db:
+            load_order(db, order_id)
+            rows = db.execute("""SELECT version, action, recorded_at, state FROM review_history
+                                 WHERE order_id = ? ORDER BY version""", (order_id,))
+            return [{"version": version, "action": action, "recorded_at_utc": timestamp,
+                     **json.loads(state)} for version, action, timestamp, state in rows]
 
     @app.get("/orders/{order_id}/evidence")
     def evidence(order_id: str, version: int):
@@ -138,7 +168,7 @@ def create_app(database: Path) -> FastAPI:
             match = resolve_kit(document["model"], document["serial"], document["revision"])
             document["match"] = asdict(match)
             document["status"] = "awaiting_review" if match.part_code else "needs_clarification"
-            return save_review(db, document)
+            return save_review(db, document, "clarified")
 
     @app.post("/orders/{order_id}/approval")
     def approve(order_id: str, review: ReviewVersion):
@@ -153,7 +183,7 @@ def create_app(database: Path) -> FastAPI:
             if not match.part_code or asdict(match) != document["match"]:
                 raise HTTPException(409, "A current, supported match must be reviewed before approval.")
             document["status"] = "approved"
-            return save_review(db, document)
+            return save_review(db, document, "approved")
 
     @app.get("/orders/{order_id}/export")
     def export(order_id: str):

@@ -63,6 +63,35 @@ class UploadTests(unittest.TestCase):
         self.assertEqual(self.client.patch(url + "/clarification",
                          json={"version": approved["version"], "revision": "A"}).status_code, 409)
 
+    def test_history_survives_restart_and_retries(self):
+        url = "/orders/po-1002"
+        self.assertEqual(self.client.get(url + "/history").status_code, 404)
+        for _ in range(2):
+            self.upload((ORDERS / "PO-1002.pdf").read_bytes())
+        self.client.post(url + "/approval", json={"version": 1})
+        self.client.patch(url + "/clarification", json={"version": 1, "serial": "18B042"})
+        for _ in range(2):
+            self.client.post(url + "/approval", json={"version": 2})
+        with TestClient(create_app(self.database)) as restarted:
+            events = restarted.get(url + "/history").json()
+        self.assertEqual([(e["version"], e["action"]) for e in events],
+                         [(1, "uploaded"), (2, "clarified"), (3, "approved")])
+        self.assertEqual(events[0]["serial"], "")
+        self.assertEqual(events[1]["serial"], "18B042")
+        self.assertEqual(events[1]["match"]["part_code"], "SK-40B")
+        self.assertEqual(events[2]["status"], "approved")
+
+    def test_legacy_order_history_begins_at_current_version(self):
+        import sqlite3
+        self.upload((ORDERS / "PO-1001.pdf").read_bytes())
+        self.client.post("/orders/PO-1001/approval", json={"version": 1})
+        with sqlite3.connect(self.database) as db:
+            db.execute("DROP TABLE review_history")
+        with TestClient(create_app(self.database)) as restarted:
+            events = restarted.get("/orders/PO-1001/history").json()
+        self.assertEqual([(e["action"], e["version"], e["status"]) for e in events],
+                         [("existing_draft", 2, "approved")])
+
     def test_conflicting_revision_blocks_approval(self):
         self.upload((ORDERS / "PO-1001.pdf").read_bytes())
         url = "/orders/PO-1001"
