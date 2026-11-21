@@ -71,6 +71,11 @@ def main():
     args = parser.parse_args()
     if args.limit is not None and args.limit < 1:
         parser.error("--limit must be positive")
+    if args.live:
+        from dotenv import load_dotenv
+        load_dotenv(Path(__file__).with_name(".env"))
+        if os.getenv("OPENAI_MODEL", MODEL) != MODEL:
+            parser.error(f"Only {MODEL} is enabled for paid evaluations")
     key = os.getenv("OPENAI_API_KEY")
     if args.live and not key:
         parser.error("Live evaluation requires OPENAI_API_KEY in the local environment")
@@ -87,7 +92,21 @@ def main():
             evidence = shortlist(query, records)
             reply = baseline(query, evidence)
             if args.live:
-                raw, usage = ask_luna(client, query, evidence)
+                span = nullcontext()
+                if os.getenv("LANGSMITH_TRACING", "").lower() == "true":
+                    from langsmith import trace
+                    span = trace("OrderProof part review", run_type="llm",
+                                 project_name=os.getenv("LANGSMITH_PROJECT") or "OrderProof",
+                                 inputs={"query": query, "records": [vars(r) for r in evidence]},
+                                 metadata={"ls_model_name": MODEL, "ls_provider": "openai",
+                                           "agent_id": os.getenv("LANGSMITH_AGENT_ID"),
+                                           "environment": os.getenv("LANGSMITH_AGENT_ENVIRONMENT")})
+                with span as run:
+                    raw, usage = ask_luna(client, query, evidence)
+                    if run is not None:
+                        run.end(outputs={"reply": raw, "usage": usage})
+                if args.limit == 1:
+                    print(json.dumps({"query": query, "reply": raw, "usage": usage}))
                 counts["calls"] += 1
                 for field in ("prompt_tokens", "completion_tokens"):
                     counts[field] += usage.get(field, 0)
