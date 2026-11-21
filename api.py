@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from intake import IntakeError, read_order_stream
 from matching import resolve_kit, read_rows
+from review_flow import ReviewConflict, advance
 from retrieval import shortlist, supplier_records
 
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024
@@ -49,7 +50,6 @@ def record_event(db, document, action):
 
 
 def save_review(db, document, action):
-    document["version"] += 1
     db.execute("UPDATE drafts SET document = ? WHERE order_id = ?",
                (json.dumps(document), document["order_id"]))
     record_event(db, document, action)
@@ -71,6 +71,9 @@ def create_app(database: Path) -> FastAPI:
                 document TEXT NOT NULL
             )""")
             db.execute("BEGIN IMMEDIATE")
+            db.execute("""CREATE TABLE IF NOT EXISTS review_checkpoints (
+                order_id TEXT PRIMARY KEY COLLATE NOCASE, encoding TEXT NOT NULL,
+                payload BLOB NOT NULL)""")
             db.execute("""CREATE TABLE IF NOT EXISTS review_history (
                 order_id TEXT COLLATE NOCASE NOT NULL,
                 version INTEGER NOT NULL,
@@ -115,6 +118,7 @@ def create_app(database: Path) -> FastAPI:
                 (draft.order_id, fingerprint, json.dumps(result)),
             )
             if inserted.rowcount:
+                advance(db, result)
                 record_event(db, result, "uploaded")
                 return result
             # Another request may have inserted the same upload while we parsed it.
@@ -162,12 +166,7 @@ def create_app(database: Path) -> FastAPI:
             check_version(document, change.version)
             if document["status"] == "approved":
                 raise HTTPException(409, "This order is already approved.")
-            document.setdefault("original_evidence", {
-                "serial": document["serial"], "revision": document["revision"]})
-            document.update(updates)
-            match = resolve_kit(document["model"], document["serial"], document["revision"])
-            document["match"] = asdict(match)
-            document["status"] = "awaiting_review" if match.part_code else "needs_clarification"
+            document = advance(db, document, {"action": "clarify", "updates": updates})
             return save_review(db, document, "clarified")
 
     @app.post("/orders/{order_id}/approval")
@@ -179,10 +178,10 @@ def create_app(database: Path) -> FastAPI:
                     document["version"], document["version"] - 1):
                 return document
             check_version(document, review.version)
-            match = resolve_kit(document["model"], document["serial"], document["revision"])
-            if not match.part_code or asdict(match) != document["match"]:
-                raise HTTPException(409, "A current, supported match must be reviewed before approval.")
-            document["status"] = "approved"
+            try:
+                document = advance(db, document, {"action": "approve"})
+            except ReviewConflict as exc:
+                raise HTTPException(409, str(exc)) from exc
             return save_review(db, document, "approved")
 
     @app.get("/orders/{order_id}/export")

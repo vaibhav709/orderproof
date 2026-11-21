@@ -92,6 +92,30 @@ class UploadTests(unittest.TestCase):
         self.assertEqual([(e["action"], e["version"], e["status"]) for e in events],
                          [("existing_draft", 2, "approved")])
 
+    def test_resume_after_restart_at_each_human_pause(self):
+        import sqlite3
+        url = "/orders/PO-1002"
+        self.upload((ORDERS / "PO-1002.pdf").read_bytes())
+        with sqlite3.connect(self.database) as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM review_checkpoints").fetchone(), (1,))
+        with TestClient(create_app(self.database)) as restarted:
+            result = restarted.patch(url + "/clarification", json={"version": 1, "serial": "18B042"})
+            self.assertEqual(result.json()["match"]["part_code"], "SK-40B")
+            self.assertEqual(len(restarted.get(url + "/export").text.splitlines()), 1)
+        with TestClient(create_app(self.database)) as restarted:
+            self.assertEqual(restarted.post(url + "/approval", json={"version": 2}).json()["version"], 3)
+            self.assertIn("SK-40B,2,KIT", restarted.get(url + "/export").text)
+        with sqlite3.connect(self.database) as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM review_checkpoints").fetchone(), (0,))
+
+    def test_existing_waiting_order_without_checkpoint_can_resume(self):
+        import sqlite3
+        self.upload((ORDERS / "PO-1001.pdf").read_bytes())
+        with sqlite3.connect(self.database) as db:
+            db.execute("DELETE FROM review_checkpoints")
+        result = self.client.post("/orders/PO-1001/approval", json={"version": 1})
+        self.assertEqual(result.json()["status"], "approved")
+
     def test_conflicting_revision_blocks_approval(self):
         self.upload((ORDERS / "PO-1001.pdf").read_bytes())
         url = "/orders/PO-1001"
