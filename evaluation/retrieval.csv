@@ -49,3 +49,11 @@ evaluation,Oil filter for forklift,,review
 evaluation,Invoice payment overdue,,review
 evaluation,Ship packing tape,,review
 evaluation,Need a gearbox bearing,,review
+expanded,Quote a seal kit for PX-60 serial 26T249,bulletin/SB-060 parts/SK-60A,SK-60A
+expanded,Identify the seal for PX-60 serial 26T250,bulletin/SB-060 parts/SK-60B,SK-60B
+expanded,Which cartridge seal fits PX-80 serial 31C099?,bulletin/SB-080 parts/SK-80C,SK-80C
+expanded,Which cartridge seal fits PX-80 serial 31C100?,bulletin/SB-080 parts/SK-80D,SK-80D
+expanded,Need a seal kit for PX-60 but the serial plate is missing,parts/SK-60A parts/SK-60B,review
+expanded,PX-80 revision C with serial 31C100 needs a seal,bulletin/SB-080,review
+expanded,Quote BR-40,catalog/BR-40,BR-40
+expanded,Please supply GS-60,catalog/GS-60,GS-60

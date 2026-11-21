@@ -78,7 +78,7 @@ def score(case, reply, evidence, counts):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--live", action="store_true")
-    parser.add_argument("--split", choices=["development", "evaluation"], default="evaluation")
+    parser.add_argument("--split", choices=["development", "evaluation", "expanded"], default="evaluation")
     parser.add_argument("--limit", type=int)
     args = parser.parse_args()
     if args.limit is not None and args.limit < 1:
@@ -130,7 +130,11 @@ def main():
                     reply = json.loads(raw or "")
                 except ValueError:
                     reply = None
+            previous_correct = counts["correct_with_evidence"]
             score(case, reply, evidence, counts)
+            if args.live and counts["correct_with_evidence"] == previous_correct:
+                print(json.dumps({"miss": query, "expected": case["decision"], "reply": reply,
+                                  "retrieved": [record.key for record in evidence]}))
     print(json.dumps({"method": MODEL if args.live else "exact-code baseline",
                       "split": args.split, "cases": len(cases), **counts,
                       "seconds": round(time.monotonic() - start, 2)}, indent=2))
