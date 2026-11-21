@@ -18,3 +18,10 @@ class BenchmarkTests(unittest.TestCase):
         counts = Counter()
         score({"decision": "review"}, {"decision": "SK-40A", "citations": []}, [], counts)
         self.assertEqual(counts["wrong_part_suggestions"], 1)
+
+    def test_quoted_request_is_invalid_even_with_correct_citation(self):
+        counts = Counter()
+        key = "catalog/SK-40A"
+        score({"decision": "SK-40A", "required": key},
+              {"decision": "Quote SK-40A", "citations": [key]}, [Record(key, "")], counts)
+        self.assertEqual(counts, {"invalid_output": 1})
