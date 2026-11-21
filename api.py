@@ -2,8 +2,7 @@
 import csv
 import hashlib
 import json
-import sqlite3
-from contextlib import asynccontextmanager, closing
+from contextlib import asynccontextmanager
 from dataclasses import asdict
 from io import BytesIO, StringIO
 from pathlib import Path
@@ -18,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from intake import IntakeError, read_order_stream
 from matching import resolve_kit, read_rows
 from review_flow import ReviewConflict, advance
+from storage import configured_database, transaction
 from retrieval import shortlist, supplier_records
 
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024
@@ -33,8 +33,11 @@ class Clarification(ReviewVersion):
     revision: str | None = Field(default=None, max_length=32)
 
 
-def load_order(db, order_id):
-    row = db.execute("SELECT document FROM drafts WHERE order_id = ?", (order_id,)).fetchone()
+def load_order(db, order_id, *, lock=False):
+    sql = "SELECT document FROM drafts WHERE order_id = ?"
+    if lock and db.postgres:
+        sql += " FOR UPDATE"
+    row = db.execute(sql, (order_id.upper(),)).fetchone()
     if row is None:
         raise HTTPException(404, "Order not found.")
     document = json.loads(row[0])
@@ -61,24 +64,28 @@ def check_version(document, supplied):
         raise HTTPException(409, "The draft changed. Reload before reviewing it.")
 
 
-def create_app(database: Path) -> FastAPI:
+def create_app(database: Path | str) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        with closing(sqlite3.connect(database)) as db, db:
-            db.execute("""CREATE TABLE IF NOT EXISTS drafts (
-                order_id TEXT PRIMARY KEY COLLATE NOCASE,
+        with transaction(database, write=True) as db:
+            if db.postgres:
+                db.execute("SELECT pg_advisory_xact_lock(763452901)")
+            id_type = "TEXT" if db.postgres else "TEXT COLLATE NOCASE"
+            binary_type = "BYTEA" if db.postgres else "BLOB"
+            timestamp = "(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')" if db.postgres else "CURRENT_TIMESTAMP"
+            db.execute(f"""CREATE TABLE IF NOT EXISTS drafts (
+                order_id {id_type} PRIMARY KEY,
                 fingerprint TEXT NOT NULL UNIQUE,
                 document TEXT NOT NULL
             )""")
-            db.execute("BEGIN IMMEDIATE")
-            db.execute("""CREATE TABLE IF NOT EXISTS review_checkpoints (
-                order_id TEXT PRIMARY KEY COLLATE NOCASE, encoding TEXT NOT NULL,
-                payload BLOB NOT NULL)""")
-            db.execute("""CREATE TABLE IF NOT EXISTS review_history (
-                order_id TEXT COLLATE NOCASE NOT NULL,
+            db.execute(f"""CREATE TABLE IF NOT EXISTS review_checkpoints (
+                order_id {id_type} PRIMARY KEY, encoding TEXT NOT NULL,
+                payload {binary_type} NOT NULL)""")
+            db.execute(f"""CREATE TABLE IF NOT EXISTS review_history (
+                order_id {id_type} NOT NULL,
                 version INTEGER NOT NULL,
                 action TEXT NOT NULL,
-                recorded_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                recorded_at TEXT NOT NULL DEFAULT {timestamp},
                 state TEXT NOT NULL,
                 PRIMARY KEY (order_id, version)
             )""")
@@ -97,7 +104,7 @@ def create_app(database: Path) -> FastAPI:
         if not content.startswith(b"%PDF-"):
             raise HTTPException(422, "Select a text-based PDF purchase order.")
         fingerprint = hashlib.sha256(content).hexdigest()
-        with closing(sqlite3.connect(database)) as db, db:
+        with transaction(database, write=True) as db:
             def previous_upload():
                 return db.execute("SELECT document FROM drafts WHERE fingerprint = ?",
                                   (fingerprint,)).fetchone()
@@ -130,21 +137,21 @@ def create_app(database: Path) -> FastAPI:
 
     @app.get("/orders/{order_id}")
     def get_order(order_id: str):
-        with closing(sqlite3.connect(database)) as db:
+        with transaction(database) as db:
             return load_order(db, order_id)
 
     @app.get("/orders/{order_id}/history")
     def history(order_id: str):
-        with closing(sqlite3.connect(database)) as db:
+        with transaction(database) as db:
             load_order(db, order_id)
             rows = db.execute("""SELECT version, action, recorded_at, state FROM review_history
-                                 WHERE order_id = ? ORDER BY version""", (order_id,))
+                                 WHERE order_id = ? ORDER BY version""", (order_id.upper(),))
             return [{"version": version, "action": action, "recorded_at_utc": timestamp,
                      **json.loads(state)} for version, action, timestamp, state in rows]
 
     @app.get("/orders/{order_id}/evidence")
     def evidence(order_id: str, version: int):
-        with closing(sqlite3.connect(database)) as db:
+        with transaction(database) as db:
             draft = load_order(db, order_id)
         check_version(draft, version)
         query = f"{draft['model']} mechanical seal kit"
@@ -160,9 +167,8 @@ def create_app(database: Path) -> FastAPI:
                    change.model_dump(exclude={"version"}, exclude_none=True).items()}
         if not updates or not all(updates.values()):
             raise HTTPException(422, "Supply a serial number or revision.")
-        with closing(sqlite3.connect(database)) as db, db:
-            db.execute("BEGIN IMMEDIATE")
-            document = load_order(db, order_id)
+        with transaction(database, write=True) as db:
+            document = load_order(db, order_id, lock=True)
             check_version(document, change.version)
             if document["status"] == "approved":
                 raise HTTPException(409, "This order is already approved.")
@@ -171,9 +177,8 @@ def create_app(database: Path) -> FastAPI:
 
     @app.post("/orders/{order_id}/approval")
     def approve(order_id: str, review: ReviewVersion):
-        with closing(sqlite3.connect(database)) as db, db:
-            db.execute("BEGIN IMMEDIATE")
-            document = load_order(db, order_id)
+        with transaction(database, write=True) as db:
+            document = load_order(db, order_id, lock=True)
             if document["status"] == "approved" and review.version in (
                     document["version"], document["version"] - 1):
                 return document
@@ -186,7 +191,7 @@ def create_app(database: Path) -> FastAPI:
 
     @app.get("/orders/{order_id}/export")
     def export(order_id: str):
-        with closing(sqlite3.connect(database)) as db:
+        with transaction(database) as db:
             order = load_order(db, order_id)
         output = StringIO(newline="")
         writer = csv.writer(output, lineterminator="\n")
@@ -219,4 +224,4 @@ def create_app(database: Path) -> FastAPI:
     return app
 
 
-app = create_app(Path(__file__).with_name("orderproof.sqlite3"))
+app = create_app(configured_database())

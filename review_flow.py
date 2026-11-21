@@ -1,4 +1,4 @@
-"""Resume one human decision at a time inside the draft's SQLite transaction."""
+"""Resume one human decision at a time inside the draft's database transaction."""
 from dataclasses import asdict
 from itertools import groupby
 from typing import TypedDict
@@ -73,6 +73,8 @@ def advance(db, document, decision=None):
     else:
         encoding, payload = saver.serde.dumps_typed(
             [saved.checkpoint, saved.metadata, saved.pending_writes or []])
-        db.execute("INSERT OR REPLACE INTO review_checkpoints VALUES (?, ?, ?)",
+        db.execute("""INSERT INTO review_checkpoints VALUES (?, ?, ?)
+                      ON CONFLICT (order_id) DO UPDATE SET encoding=excluded.encoding,
+                      payload=excluded.payload""",
                    (order_id, encoding, payload))
     return result
