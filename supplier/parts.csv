@@ -1,3 +1,9 @@
 pump_model,pump_revision,part_role,part_code,data_origin
 PX-40,A,mechanical seal kit,SK-40A,fictional
 PX-40,B,mechanical seal kit,SK-40B,fictional
+PX-60,A,mechanical seal kit,SK-60A,fictional
+PX-60,B,mechanical seal kit,SK-60B,fictional
+PX-80,C,mechanical seal kit,SK-80C,fictional
+PX-80,D,mechanical seal kit,SK-80D,fictional
+PX-40,A,drive end bearing,BR-40,fictional
+PX-60,A,casing gasket set,GS-60,fictional

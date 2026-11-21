@@ -18,7 +18,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from demo_privacy import isolate_visitor, storage_key
 from intake import IntakeError, read_order_stream
-from matching import resolve_kit, read_rows
+from matching import resolve_kit
+from catalog import rows as catalog_rows, DEFAULT
 from review_flow import ReviewConflict, advance
 from storage import configured_database, transaction
 from retrieval import shortlist, supplier_records
@@ -70,6 +71,8 @@ def check_version(document, supplied):
 def create_app(database: Path | str, *, demo: bool | None = None) -> FastAPI:
     if demo is None:
         demo = bool(os.getenv("VERCEL")) or os.getenv("ORDERPROOF_DEMO") == "1"
+    if demo and Path(os.getenv("ORDERPROOF_CATALOG_PATH") or DEFAULT).resolve() != DEFAULT:
+        raise RuntimeError("The anonymous demo requires the bundled fictional catalog")
     sample_hashes = {hashlib.sha256(path.read_bytes()).hexdigest()
                      for path in (Path(__file__).parent / "orders").glob("PO-*.pdf")} if demo else set()
 
@@ -216,7 +219,7 @@ def create_app(database: Path | str, *, demo: bool | None = None) -> FastAPI:
         if order["status"] == "approved":
             code = order["match"]["part_code"]
             match = resolve_kit(order["model"], order["serial"], order["revision"])
-            rows = [row for row in read_rows("catalog.csv") if row["part_code"] == code]
+            rows = [row for row in catalog_rows("products") if row["part_code"] == code]
             if match.part_code != code or len(rows) != 1:
                 raise HTTPException(409, "The approved part requires a new catalog review.")
             part = rows[0]
@@ -227,6 +230,10 @@ def create_app(database: Path | str, *, demo: bool | None = None) -> FastAPI:
                              order["quantity"] // pack, part["sales_unit"]])
         return Response(output.getvalue(), media_type="text/csv",
                         headers={"Content-Disposition": f'attachment; filename="{order_id}-approved.csv"'})
+
+    @app.get("/catalog")
+    def catalog():
+        return {table: catalog_rows(table) for table in ("products", "compatibility", "serial_ranges")}
 
     @app.get("/samples/{sample_id}")
     def sample(sample_id: str):

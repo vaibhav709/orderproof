@@ -60,6 +60,34 @@ function SupplierRecords({order}) {
   </details>;
 }
 
+function ProductCatalog() {
+  const [catalog, setCatalog] = useState(null);
+  const [error, setError] = useState("");
+  async function open(event) {
+    if (!event.currentTarget.open || catalog) return;
+    try {
+      setError("");
+      setCatalog(await (await request("/catalog")).json());
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+  return <details className="supplier-records" onToggle={open}>
+    <summary>Browse supplier catalog</summary>
+    {error && <p role="alert">{error}</p>}
+    {catalog && <div style={{overflowX:"auto"}}><table>
+      <caption>{catalog.products.every(p=>p.data_origin==="fictional") ? "Fictional supplier inventory" : "Supplier inventory"}</caption>
+      <thead><tr>{["Part", "Description and material", "Fits", "Stock", "Pack size", "Lead time", "Bin"].map(h=><th key={h}>{h}</th>)}</tr></thead>
+      <tbody>{catalog.products.map(p=><tr key={p.part_code}>
+        <th>{p.part_code}</th><td>{p.description} · {p.material}</td>
+        <td>{catalog.compatibility.filter(c=>c.part_code===p.part_code).map(c=>c.pump_model+" rev "+c.pump_revision).join(", ")}</td>
+        <td>{p.stock_units} {p.sales_unit}</td><td>{p.kits_per_sales_unit}</td>
+        <td>{p.lead_days} days</td><td>{p.bin_location}</td>
+      </tr>)}</tbody>
+    </table></div>}
+  </details>;
+}
+
 function App() {
   const [order,setOrder] = useState(null), [source,setSource] = useState(""), [busy,setBusy] = useState(true);
   const [error,setError] = useState(""), [identifier,setIdentifier] = useState("");
@@ -108,6 +136,7 @@ function App() {
           setOrder(await upload(file)); setSource(URL.createObjectURL(file)); setIdentifier("");
         });
       }}/></nav>
+      <ProductCatalog/>
       {demo && <p>Fictional sample orders only. You review the supplier evidence and approve each export.</p>}
       {error && <div role="alert">{error} {order && <button className="secondary" disabled={busy} onClick={()=>run(async()=>setOrder(await (await request(orderUrl)).json()))}>Reload draft</button>}</div>}
       {!order ? <p role="status">{busy ? "Opening order…" : "Choose a sample order or upload a PDF."}</p> :

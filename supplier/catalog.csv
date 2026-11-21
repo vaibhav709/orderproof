@@ -1,3 +1,9 @@
-part_code,description,sales_unit,kits_per_sales_unit,data_origin
-SK-40A,PX-40 mechanical seal kit type A,KIT,1,fictional
-SK-40B,PX-40 mechanical seal kit type B,KIT,1,fictional
+part_code,description,sales_unit,kits_per_sales_unit,data_origin,material,stock_units,lead_days,bin_location
+SK-40A,PX-40 mechanical seal kit type A,KIT,1,fictional,Carbon ceramic EPDM,18,4,A-01
+SK-40B,PX-40 mechanical seal kit type B,KIT,1,fictional,Silicon carbide FKM,7,8,A-02
+SK-60A,PX-60 transfer pump seal service kit,PACK,2,fictional,Carbon ceramic NBR,9,5,B-01
+SK-60B,PX-60 transfer pump upgraded seal service kit,KIT,1,fictional,Silicon carbide FKM,0,14,B-02
+SK-80C,PX-80 circulation pump cartridge seal,KIT,1,fictional,Silicon carbide EPDM,4,10,C-01
+SK-80D,PX-80 circulation pump cartridge seal extended duty,KIT,1,fictional,Tungsten carbide FKM,3,12,C-02
+BR-40,PX-40 drive end bearing,EA,1,fictional,Chrome steel,22,3,D-01
+GS-60,PX-60 casing gasket set,SET,1,fictional,Aramid fibre,15,6,D-02

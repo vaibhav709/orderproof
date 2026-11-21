@@ -5,7 +5,8 @@ import re
 from collections import Counter
 from dataclasses import dataclass
 
-from matching import SUPPLIER, read_rows, resolve_kit
+from catalog import rows
+from matching import resolve_kit
 
 
 @dataclass(frozen=True)
@@ -15,13 +16,22 @@ class Record:
 
 
 def supplier_records():
-    records = [Record("catalog/" + row["part_code"], f'{row["part_code"]} {row["description"]}')
-               for row in read_rows("catalog.csv")]
-    for row in read_rows("parts.csv"):
-        records.append(Record("parts/" + row["part_code"],
-                              f'{row["pump_model"]} revision {row["pump_revision"]} '
-                              f'{row["part_role"]} {row["part_code"]}'))
-    records.append(Record("bulletin/SB-040", (SUPPLIER / "bulletin.md").read_text()))
+    records = [Record("catalog/" + r["part_code"],
+                      f'{r["part_code"]} {r["description"]}. Material: {r["material"]}. '
+                      f'Stock: {r["stock_units"]} {r["sales_unit"]}. Units per sales unit: '
+                      f'{r["kits_per_sales_unit"]}. Lead time: {r["lead_days"]} days. Bin: {r["bin_location"]}.')
+               for r in rows("products")]
+    mappings = {}
+    for r in rows("compatibility"):
+        mappings.setdefault(r["part_code"], []).append(
+            f'{r["pump_model"]} revision {r["pump_revision"]} {r["part_role"]} {r["part_code"]}')
+    records.extend(Record("parts/" + code, ". ".join(lines)) for code, lines in mappings.items())
+    bulletins = {}
+    for r in rows("serial_ranges"):
+        bulletins.setdefault(r["bulletin"], []).append(
+            f'{r["pump_model"]} serial {r["prefix"]}{r["first_suffix"]} through '
+            f'{r["prefix"]}{r["last_suffix"]}: revision {r["pump_revision"]}.')
+    records.extend(Record("bulletin/" + code, " ".join(lines)) for code, lines in bulletins.items())
     return records
 
 
@@ -31,20 +41,32 @@ def tokens(text):
 
 
 def serial_evidence(query, records):
-    """Rank evidence from the demo bulletin when a buyer quotes an 18B serial."""
-    serials = set(re.findall(r"\b18B[0-9]{3}\b", query.upper()))
-    if not serials:
+    words = set(re.findall(r"[A-Z0-9-]+", query.upper()))
+    rules = rows("serial_ranges")
+    candidates = [(word, r) for r in rules for word in words
+                  if word.startswith(r["prefix"]) and word[len(r["prefix"]):].isdigit()
+                  and len(word) == len(r["prefix"]) + len(r["first_suffix"])]
+    if not candidates:
         return None
     by_key = {r.key: r for r in records}
-    bulletin = by_key.get("bulletin/SB-040")
-    if bulletin is None:
-        return []
-    evidence = [bulletin]
-    models = set(re.findall(r"\bPX-?([0-9]+)\b", query.upper()))
+    bulletin_keys = sorted({"bulletin/" + rule["bulletin"] for _, rule in candidates})
+    evidence = [by_key[key] for key in bulletin_keys if key in by_key]
+    serials = {word for word, _ in candidates}
+    models = {rule["pump_model"] for _, rule in candidates}
     revisions = set(re.findall(r"\bREV(?:ISION)?[. :_-]+([A-Z0-9]+)\b", query.upper()))
-    if len(serials) != 1 or models - {"40"} or len(revisions) > 1:
+    if len(serials) != 1 or len(models) != 1 or len(revisions) > 1:
         return evidence
-    match = resolve_kit("PX-40", serials.pop(), next(iter(revisions), ""))
+    model = models.pop()
+    # Recognize other identifiers in the same pump family, including unknown models.
+    family = re.match(r"[A-Z]+", model)
+    if family:
+        mentioned = re.findall(r"\b" + family[0] + r"-?[0-9]+\b", query.upper())
+        if any(item.replace("-", "") != model.replace("-", "") for item in mentioned):
+            return evidence
+    if any(r["pump_model"] != model and r["pump_model"].replace("-", "")
+           in {w.replace("-", "") for w in words} for r in rules):
+        return evidence
+    match = resolve_kit(model, serials.pop(), next(iter(revisions), ""))
     if match.part_code:
         for key in ["parts/" + match.part_code, "catalog/" + match.part_code]:
             if key in by_key:
@@ -64,6 +86,11 @@ def shortlist(query, records, method="serial-aware", limit=3):
         return hits[:limit]
     if method != "lexical":
         raise ValueError("Unknown retrieval method")
+    # When the buyer names a known pump, rank evidence that covers that model.
+    named_models = {tokens(r["pump_model"])[0] for r in rows("compatibility")} & words
+    if named_models:
+        records = [r for r in records if named_models.intersection(tokens(r.text))
+                   or tokens(r.key.split("/")[-1])[0] in words]
     counts = [Counter(tokens(r.text)) for r in records]
     ranking = []
     for record, terms in zip(records, counts):

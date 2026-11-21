@@ -88,6 +88,8 @@ def main():
     if args.live:
         from dotenv import load_dotenv
         load_dotenv(Path(__file__).with_name(".env"))
+        if os.getenv("ORDERPROOF_CATALOG_PATH"):
+            parser.error("Live benchmarks require the bundled fictional supplier data")
         if os.getenv("OPENAI_MODEL", MODEL) != MODEL:
             parser.error(f"Only {MODEL} is enabled for paid evaluations")
     key = os.getenv("OPENAI_API_KEY")

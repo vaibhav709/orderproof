@@ -1,0 +1,7 @@
+bulletin,pump_model,prefix,first_suffix,last_suffix,pump_revision
+SB-040,PX-40,18B,000,039,A
+SB-040,PX-40,18B,040,099,B
+SB-060,PX-60,26T,000,249,A
+SB-060,PX-60,26T,250,499,B
+SB-080,PX-80,31C,000,099,C
+SB-080,PX-80,31C,100,199,D
