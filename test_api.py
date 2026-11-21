@@ -1,0 +1,44 @@
+import tempfile
+import unittest
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+
+from fastapi.testclient import TestClient
+
+from api import create_app
+
+ORDERS = Path(__file__).with_name("orders")
+
+
+class UploadTests(unittest.TestCase):
+    def setUp(self):
+        folder = self.enterContext(tempfile.TemporaryDirectory())
+        self.database = Path(folder) / "orders.sqlite3"
+        self.client = self.enterContext(TestClient(create_app(self.database)))
+
+    def upload(self, content, name="buyer.pdf"):
+        return self.client.post("/orders", files={"file": (name, content, "application/pdf")})
+
+    def test_persistence_and_conflicting_revision(self):
+        content = (ORDERS / "PO-1001.pdf").read_bytes()
+        first = self.upload(content)
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(first.json()["status"], "awaiting_review")
+        duplicate = self.upload(content, "renamed.pdf")
+        self.assertEqual(duplicate.status_code, 200)
+        self.assertEqual(duplicate.json(), first.json())
+        self.assertEqual(self.upload(content + b"\n").status_code, 409)
+        with TestClient(create_app(self.database)) as restarted:
+            self.assertEqual(restarted.get("/orders/PO-1001").json(), first.json())
+
+    def test_concurrent_retries_create_one_draft(self):
+        content = (ORDERS / "PO-1002.pdf").read_bytes()
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            results = list(pool.map(self.upload, [content] * 4))
+        self.assertEqual(sorted(r.status_code for r in results), [200, 200, 200, 201])
+        self.assertTrue(all(r.json()["status"] == "needs_clarification" for r in results))
+
+    def test_invalid_upload_and_unknown_order(self):
+        self.assertEqual(self.upload(b"not a PDF").status_code, 422)
+        self.assertEqual(self.upload(b"%PDF-broken").status_code, 422)
+        self.assertEqual(self.client.get("/orders/missing").status_code, 404)

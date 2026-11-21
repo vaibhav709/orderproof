@@ -4,6 +4,7 @@ import json
 import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import BinaryIO
 
 from pypdf import PdfReader
 from pypdf.errors import PdfReadError
@@ -53,16 +54,20 @@ def parse_order_text(text: str) -> OrderDraft:
                       "KIT", serial, revision, 1, match)
 
 
-def read_order(path: Path) -> OrderDraft:
+def read_order_stream(source: BinaryIO) -> OrderDraft:
     try:
-        with path.open("rb") as source:
-            pdf = PdfReader(source)
-            if pdf.is_encrypted or len(pdf.pages) != 1:
-                raise IntakeError("This importer requires one unencrypted PDF page.")
-            text = pdf.pages[0].extract_text()
+        pdf = PdfReader(source)
+        if pdf.is_encrypted or len(pdf.pages) != 1:
+            raise IntakeError("This importer requires one unencrypted PDF page.")
+        text = pdf.pages[0].extract_text()
     except PdfReadError as exc:
         raise IntakeError("The PDF could not be read.") from exc
     return parse_order_text(text)
+
+
+def read_order(path: Path) -> OrderDraft:
+    with path.open("rb") as source:
+        return read_order_stream(source)
 
 
 if __name__ == "__main__":
