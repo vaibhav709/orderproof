@@ -25,3 +25,10 @@ class BenchmarkTests(unittest.TestCase):
         score({"decision": "SK-40A", "required": key},
               {"decision": "Quote SK-40A", "citations": [key]}, [Record(key, "")], counts)
         self.assertEqual(counts, {"invalid_output": 1})
+
+    def test_bearing_and_gasket_count_as_catalog_decisions(self):
+        counts = Counter()
+        score({"decision": "SK-40A"}, {"decision": "BR-40", "citations": ["parts/BR-40"]},
+              [Record("parts/BR-40", "")], counts)
+        score({"decision": "GS-60"}, {"decision": "review", "citations": []}, [], counts)
+        self.assertEqual(counts, {"wrong_part_suggestions": 1, "unnecessary_reviews": 1})

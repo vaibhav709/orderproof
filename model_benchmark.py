@@ -10,6 +10,7 @@ from pathlib import Path
 
 import httpx
 
+from catalog import rows
 from retrieval import shortlist, supplier_records, tokens
 
 MODEL = "gpt-6-luna"
@@ -58,13 +59,14 @@ def score(case, reply, evidence, counts):
         counts["invalid_output"] += 1
         return
     expected = case["decision"]
-    if decision.startswith("SK-") and decision != expected:
+    catalog_codes = {row["part_code"] for row in rows("products")}
+    if decision in catalog_codes and decision != expected:
         counts["wrong_part_suggestions"] += 1
     if decision not in {"review", "reference"} and not any(
             record.key in {"catalog/" + decision, "parts/" + decision} for record in evidence):
         counts["invalid_output"] += 1
         return
-    if decision == "review" and expected.startswith("SK-"):
+    if decision == "review" and expected in catalog_codes:
         counts["unnecessary_reviews"] += 1
     supplied = {record.key for record in evidence}
     cited = set(citations)

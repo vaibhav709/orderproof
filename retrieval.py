@@ -29,7 +29,7 @@ def supplier_records():
     bulletins = {}
     for r in rows("serial_ranges"):
         bulletins.setdefault(r["bulletin"], []).append(
-            f'{r["pump_model"]} serial {r["prefix"]}{r["first_suffix"]} through '
+            f'Service bulletin {r["bulletin"]} for {r["pump_model"]}, prefix {r["prefix"]}: serial {r["prefix"]}{r["first_suffix"]} through '
             f'{r["prefix"]}{r["last_suffix"]}: revision {r["pump_revision"]}.')
     records.extend(Record("bulletin/" + code, " ".join(lines)) for code, lines in bulletins.items())
     return records
