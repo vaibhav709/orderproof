@@ -64,9 +64,12 @@ function App() {
   const [order,setOrder] = useState(null), [source,setSource] = useState(""), [busy,setBusy] = useState(true);
   const [error,setError] = useState(""), [identifier,setIdentifier] = useState("");
   const input = useRef(null);
+  const [demo,setDemo] = useState(null);
   const orderUrl = order && "/orders/" + encodeURIComponent(order.order_id);
   async function openSample(id) {
-    const pdf = await (await request("/samples/"+id)).blob();
+    const sample = await request("/samples/"+id);
+    setDemo(sample.headers.get("X-OrderProof-Mode") === "fictional-demo");
+    const pdf = await sample.blob();
     setOrder(await upload(pdf)); setSource("/samples/"+id); setIdentifier("");
   }
   async function run(action) {
@@ -99,12 +102,13 @@ function App() {
     <main><nav aria-label="Order selection">
       <label>Order review <select aria-label="Open a sample order" disabled={busy} value="" onChange={e=>run(()=>openSample(e.target.value))}>
         <option value="">Open sample…</option><option>PO-1001</option><option>PO-1002</option></select></label>
-      <button className="secondary" disabled={busy} onClick={()=>input.current.click()}>Upload PDF</button>
+      {demo === false && <button className="secondary" disabled={busy} onClick={()=>input.current.click()}>Upload PDF</button>}
       <input ref={input} type="file" accept="application/pdf" hidden onChange={e=>{
         const file=e.target.files[0]; e.target.value=""; if(file) run(async()=>{
           setOrder(await upload(file)); setSource(URL.createObjectURL(file)); setIdentifier("");
         });
       }}/></nav>
+      {demo && <p>Fictional sample orders only. You review the supplier evidence and approve each export.</p>}
       {error && <div role="alert">{error} {order && <button className="secondary" disabled={busy} onClick={()=>run(async()=>setOrder(await (await request(orderUrl)).json()))}>Reload draft</button>}</div>}
       {!order ? <p role="status">{busy ? "Opening order…" : "Choose a sample order or upload a PDF."}</p> :
       <><div className="title"><h1>{order.order_id}</h1><strong role="status" className={"badge "+order.status}>{statuses[order.status]}</strong></div>

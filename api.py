@@ -2,6 +2,8 @@
 import csv
 import hashlib
 import json
+import os
+import re
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from io import BytesIO, StringIO
@@ -14,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from demo_privacy import isolate_visitor, storage_key
 from intake import IntakeError, read_order_stream
 from matching import resolve_kit, read_rows
 from review_flow import ReviewConflict, advance
@@ -37,7 +40,7 @@ def load_order(db, order_id, *, lock=False):
     sql = "SELECT document FROM drafts WHERE order_id = ?"
     if lock and db.postgres:
         sql += " FOR UPDATE"
-    row = db.execute(sql, (order_id.upper(),)).fetchone()
+    row = db.execute(sql, (storage_key(order_id.upper()),)).fetchone()
     if row is None:
         raise HTTPException(404, "Order not found.")
     document = json.loads(row[0])
@@ -49,12 +52,12 @@ def record_event(db, document, action):
     state = {key: document[key] for key in ("status", "serial", "revision", "match")}
     db.execute("""INSERT INTO review_history (order_id, version, action, state)
                   VALUES (?, ?, ?, ?)""",
-               (document["order_id"], document["version"], action, json.dumps(state)))
+               (storage_key(document["order_id"]), document["version"], action, json.dumps(state)))
 
 
 def save_review(db, document, action):
     db.execute("UPDATE drafts SET document = ? WHERE order_id = ?",
-               (json.dumps(document), document["order_id"]))
+               (json.dumps(document), storage_key(document["order_id"])))
     record_event(db, document, action)
     return document
 
@@ -64,7 +67,12 @@ def check_version(document, supplied):
         raise HTTPException(409, "The draft changed. Reload before reviewing it.")
 
 
-def create_app(database: Path | str) -> FastAPI:
+def create_app(database: Path | str, *, demo: bool | None = None) -> FastAPI:
+    if demo is None:
+        demo = bool(os.getenv("VERCEL")) or os.getenv("ORDERPROOF_DEMO") == "1"
+    sample_hashes = {hashlib.sha256(path.read_bytes()).hexdigest()
+                     for path in (Path(__file__).parent / "orders").glob("PO-*.pdf")} if demo else set()
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         with transaction(database, write=True) as db:
@@ -96,6 +104,9 @@ def create_app(database: Path | str) -> FastAPI:
 
     app = FastAPI(title="OrderProof", lifespan=lifespan)
 
+    if demo:
+        app.middleware("http")(isolate_visitor)
+
     @app.post("/orders", status_code=201)
     def upload(file: UploadFile, response: Response):
         content = file.file.read(MAX_UPLOAD_BYTES + 1)
@@ -104,6 +115,9 @@ def create_app(database: Path | str) -> FastAPI:
         if not content.startswith(b"%PDF-"):
             raise HTTPException(422, "Select a text-based PDF purchase order.")
         fingerprint = hashlib.sha256(content).hexdigest()
+        if demo and fingerprint not in sample_hashes:
+            raise HTTPException(422, "This public demo accepts only the bundled fictional PDFs.")
+        fingerprint = storage_key(fingerprint)
         with transaction(database, write=True) as db:
             def previous_upload():
                 return db.execute("SELECT document FROM drafts WHERE fingerprint = ?",
@@ -122,7 +136,7 @@ def create_app(database: Path | str) -> FastAPI:
             result["status"] = "awaiting_review" if draft.match.part_code else "needs_clarification"
             inserted = db.execute(
                 "INSERT INTO drafts VALUES (?, ?, ?) ON CONFLICT DO NOTHING",
-                (draft.order_id, fingerprint, json.dumps(result)),
+                (storage_key(draft.order_id), fingerprint, json.dumps(result)),
             )
             if inserted.rowcount:
                 advance(db, result)
@@ -145,7 +159,7 @@ def create_app(database: Path | str) -> FastAPI:
         with transaction(database) as db:
             load_order(db, order_id)
             rows = db.execute("""SELECT version, action, recorded_at, state FROM review_history
-                                 WHERE order_id = ? ORDER BY version""", (order_id.upper(),))
+                                 WHERE order_id = ? ORDER BY version""", (storage_key(order_id.upper()),))
             return [{"version": version, "action": action, "recorded_at_utc": timestamp,
                      **json.loads(state)} for version, action, timestamp, state in rows]
 
@@ -165,6 +179,9 @@ def create_app(database: Path | str) -> FastAPI:
     def clarify(order_id: str, change: Clarification):
         updates = {key: value.strip().upper() for key, value in
                    change.model_dump(exclude={"version"}, exclude_none=True).items()}
+        if demo and any(not re.fullmatch(r"18B[0-9]{3}" if key == "serial" else r"[AB]", value)
+                        for key, value in updates.items()):
+            raise HTTPException(422, "Use a fictional 18B serial or revision A or B.")
         if not updates or not all(updates.values()):
             raise HTTPException(422, "Supply a serial number or revision.")
         with transaction(database, write=True) as db:
@@ -216,7 +233,8 @@ def create_app(database: Path | str) -> FastAPI:
         if sample_id not in {"PO-1001", "PO-1002"}:
             raise HTTPException(404, "Sample unavailable.")
         return FileResponse(Path(__file__).parent / "orders" / f"{sample_id}.pdf",
-                            media_type="application/pdf")
+                            media_type="application/pdf",
+                            headers={"X-OrderProof-Mode": "fictional-demo" if demo else "local"})
 
     assets = Path(__file__).parent / "dist"
     if assets.is_dir():

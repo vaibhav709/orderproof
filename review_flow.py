@@ -7,6 +7,8 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
+from langsmith import tracing_context
+from demo_privacy import storage_key
 from matching import resolve_kit
 
 
@@ -50,7 +52,7 @@ builder.add_conditional_edges("human_review", next_step)
 def advance(db, document, decision=None):
     # Keep just the latest paused checkpoint. Draft, history and checkpoint all
     # commit together. An interrupted HTTP request can retry the same version.
-    order_id = document["order_id"]
+    order_id = storage_key(document["order_id"])
     config = {"configurable": {"thread_id": order_id, "checkpoint_ns": ""}}
     saver = InMemorySaver()
     graph = builder.compile(checkpointer=saver)
@@ -63,9 +65,11 @@ def advance(db, document, decision=None):
             saver.put_writes(restored, [(channel, value) for _, channel, value in items], task)
     else:
         # Includes orders that were waiting before graph checkpoints existed.
-        graph.invoke({"document": document}, config)
+        with tracing_context(enabled=False):
+            graph.invoke({"document": document}, config)
     if decision:
-        graph.invoke(Command(resume=decision), config)
+        with tracing_context(enabled=False):
+            graph.invoke(Command(resume=decision), config)
     saved = saver.get_tuple(config)
     result = saved.checkpoint["channel_values"]["document"]
     if result["status"] == "approved":

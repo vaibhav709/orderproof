@@ -83,6 +83,8 @@ def main():
     args = parser.parse_args()
     if args.limit is not None and args.limit < 1:
         parser.error("--limit must be positive")
+    if args.live and (os.getenv("VERCEL") or os.getenv("ORDERPROOF_DEMO") == "1"):
+        parser.error("Paid evaluations are local only")
     if args.live:
         from dotenv import load_dotenv
         load_dotenv(Path(__file__).with_name(".env"))
