@@ -1,0 +1,9 @@
+{
+  "name": "orderproof",
+  "private": true,
+  "scripts": {
+    "build": "esbuild web/main.jsx --bundle --minify --outdir=dist && cp web/index.html dist/index.html"
+  },
+  "dependencies": { "react": "19.2.7", "react-dom": "19.2.7" },
+  "devDependencies": { "esbuild": "0.27.3" }
+}

@@ -1,18 +1,22 @@
 """Local single-buyer order intake. Run with uvicorn api:app."""
+import csv
 import hashlib
 import json
 import sqlite3
 from contextlib import asynccontextmanager, closing
 from dataclasses import asdict
-from io import BytesIO
+from io import BytesIO, StringIO
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Response, UploadFile
 
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from intake import IntakeError, read_order_stream
-from matching import resolve_kit
+from matching import resolve_kit, read_rows
 
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 
@@ -138,6 +142,38 @@ def create_app(database: Path) -> FastAPI:
             document["status"] = "approved"
             return save_review(db, document)
 
+    @app.get("/orders/{order_id}/export")
+    def export(order_id: str):
+        with closing(sqlite3.connect(database)) as db:
+            order = load_order(db, order_id)
+        output = StringIO(newline="")
+        writer = csv.writer(output, lineterminator="\n")
+        writer.writerow(["order_id", "line_number", "part_code", "quantity", "sales_unit"])
+        if order["status"] == "approved":
+            code = order["match"]["part_code"]
+            match = resolve_kit(order["model"], order["serial"], order["revision"])
+            rows = [row for row in read_rows("catalog.csv") if row["part_code"] == code]
+            if match.part_code != code or len(rows) != 1:
+                raise HTTPException(409, "The approved part requires a new catalog review.")
+            part = rows[0]
+            pack = int(part["kits_per_sales_unit"])
+            if order["unit"] != "KIT" or pack < 1 or order["quantity"] % pack:
+                raise HTTPException(409, "The ordered quantity requires a pack-size review.")
+            writer.writerow([order["order_id"], order["line_number"], code,
+                             order["quantity"] // pack, part["sales_unit"]])
+        return Response(output.getvalue(), media_type="text/csv",
+                        headers={"Content-Disposition": f'attachment; filename="{order_id}-approved.csv"'})
+
+    @app.get("/samples/{sample_id}")
+    def sample(sample_id: str):
+        if sample_id not in {"PO-1001", "PO-1002"}:
+            raise HTTPException(404, "Sample unavailable.")
+        return FileResponse(Path(__file__).parent / "orders" / f"{sample_id}.pdf",
+                            media_type="application/pdf")
+
+    assets = Path(__file__).parent / "dist"
+    if assets.is_dir():
+        app.mount("/", StaticFiles(directory=assets, html=True), name="workspace")
     return app
 
 

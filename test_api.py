@@ -70,3 +70,13 @@ class UploadTests(unittest.TestCase):
         self.assertEqual(draft["status"], "needs_clarification")
         self.assertEqual(draft["serial"], "18B042")
         self.assertEqual(self.client.post(url + "/approval", json={"version": 2}).status_code, 409)
+
+    def test_approved_export_matches_reference_and_retries(self):
+        for order in ["PO-1001", "PO-1002"]:
+            self.upload((ORDERS / f"{order}.pdf").read_bytes())
+            url = f"/orders/{order}/export"
+            self.assertEqual(len(self.client.get(url).text.splitlines()), 1)
+        self.client.post("/orders/PO-1001/approval", json={"version": 1})
+        expected = (ORDERS.parent / "expected" / "approved_orders.csv").read_text()
+        for attempt in range(2):
+            self.assertEqual(self.client.get("/orders/PO-1001/export").text, expected)
