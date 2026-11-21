@@ -80,3 +80,17 @@ class UploadTests(unittest.TestCase):
         expected = (ORDERS.parent / "expected" / "approved_orders.csv").read_text()
         for attempt in range(2):
             self.assertEqual(self.client.get("/orders/PO-1001/export").text, expected)
+
+    def test_live_evidence_tracks_draft_version(self):
+        for name in ("PO-1001", "PO-1002"):
+            self.upload((ORDERS / f"{name}.pdf").read_bytes())
+        def keys(name, version):
+            result = self.client.get(f"/orders/{name}/evidence", params={"version": version})
+            self.assertEqual(result.status_code, 200)
+            return [record["key"] for record in result.json()]
+        self.assertEqual(keys("PO-1001", 1), ["bulletin/SB-040", "parts/SK-40B", "catalog/SK-40B"])
+        self.assertTrue(keys("PO-1002", 1))
+        self.client.patch("/orders/PO-1002/clarification", json={"version": 1, "serial": "18B015"})
+        self.assertEqual(self.client.get("/orders/PO-1002/evidence?version=1").status_code, 409)
+        self.assertEqual(keys("PO-1002", 2), ["bulletin/SB-040", "parts/SK-40A", "catalog/SK-40A"])
+        self.assertEqual(self.client.get("/orders/PO-1002").json()["status"], "awaiting_review")

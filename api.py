@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from intake import IntakeError, read_order_stream
 from matching import resolve_kit, read_rows
+from retrieval import shortlist, supplier_records
 
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 
@@ -106,6 +107,18 @@ def create_app(database: Path) -> FastAPI:
     def get_order(order_id: str):
         with closing(sqlite3.connect(database)) as db:
             return load_order(db, order_id)
+
+    @app.get("/orders/{order_id}/evidence")
+    def evidence(order_id: str, version: int):
+        with closing(sqlite3.connect(database)) as db:
+            draft = load_order(db, order_id)
+        check_version(draft, version)
+        query = f"{draft['model']} mechanical seal kit"
+        if draft["serial"]:
+            query += " serial " + draft["serial"]
+        if draft["revision"]:
+            query += " revision " + draft["revision"]
+        return [asdict(record) for record in shortlist(query, supplier_records())]
 
     @app.patch("/orders/{order_id}/clarification")
     def clarify(order_id: str, change: Clarification):

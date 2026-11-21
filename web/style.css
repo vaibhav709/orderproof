@@ -23,3 +23,7 @@ button:disabled{opacity:.6;cursor:default}.secondary,select{background:transpare
 select{margin-left:12px}button:focus-visible,select:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid #247eac;outline-offset:3px}
 [role=alert]{margin:16px 0;padding:12px;background:#ffe7de;border-radius:5px}
 @media(max-width:740px){.workspace{grid-template-columns:1fr}.bar,main{padding-left:16px;padding-right:16px}.viewer,.review,.paper{padding:20px}.title h1{font-size:30px}.badge{padding:8px 14px}.paper{min-height:0}.workspace{gap:16px}.viewer-head{margin-bottom:16px}}
+.supplier-records{margin:0 0 22px;color:#23463f;font-size:14px}
+.supplier-records summary{cursor:pointer;font-weight:600}
+.supplier-records div{border-left:2px solid #9dafaa;margin-top:12px;padding-left:12px}
+.supplier-records pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;margin:4px 0}

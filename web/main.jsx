@@ -36,6 +36,30 @@ function Source({order, source}) {
   </section>;
 }
 
+function SupplierRecords({order}) {
+  const [open, setOpen] = useState(false);
+  const [records, setRecords] = useState(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    if (!open) return;
+    const controller = new AbortController();
+    const url = "/orders/" + encodeURIComponent(order.order_id) + "/evidence?version=" + order.version;
+    setError("");
+    setRecords(null);
+    request(url, {signal:controller.signal})
+      .then(response => response.json())
+      .then(data => {if (!controller.signal.aborted) setRecords(data);})
+      .catch(e => {if (!controller.signal.aborted) setError(e.message);});
+    return () => controller.abort();
+  }, [open, order.order_id, order.version]);
+  return <details className="supplier-records" onToggle={e=>setOpen(e.currentTarget.open)}>
+    <summary>Related supplier records</summary>
+    {error ? <p role="alert">{error}</p> : records === null ? <p>Loading records…</p> :
+      records.length === 0 ? <p>No related records found.</p> :
+      records.map(record => <div key={record.key}><strong>{record.key}</strong><pre>{record.text}</pre></div>)}
+  </details>;
+}
+
 function App() {
   const [order,setOrder] = useState(null), [source,setSource] = useState(""), [busy,setBusy] = useState(true);
   const [error,setError] = useState(""), [identifier,setIdentifier] = useState("");
@@ -89,6 +113,7 @@ function App() {
       <p>Quantity　{order.quantity} {order.quantity === 1 ? "kit" : "kits"}</p><hr/>
       <h3>{pending ? "Pump identification" : "Compatibility evidence"}</h3>
       <p className="evidence">{order.match.reason}</p>
+      <SupplierRecords key={order.order_id + "/" + order.version} order={order}/>
       <form onSubmit={submit}>{pending ? <label>Serial number or revision<input required maxLength={64} value={identifier} onChange={e=>setIdentifier(e.target.value)} placeholder="Enter identifier"/></label> :
         <label>Matched supplier part<output>{order.match.part_code}</output></label>}
       {approved ? <button type="button" disabled={busy} onClick={()=>run(download)}>Export CSV</button> :
