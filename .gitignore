@@ -1,0 +1,12 @@
+.env
+.env.*
+*.pem
+*.key
+.venv/
+__pycache__/
+node_modules/
+dist/
+.vercel/
+*.sqlite*
+uploads/
+.DS_Store
