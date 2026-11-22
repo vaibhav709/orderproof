@@ -1,10 +1,12 @@
 """Offline baseline by default. Use --live for the local Luna evaluation."""
 import argparse
 import csv
+import hashlib
+import sqlite3
 import json
 import os
 import time
-from contextlib import nullcontext
+from contextlib import closing, nullcontext
 from collections import Counter
 from pathlib import Path
 
@@ -34,7 +36,7 @@ def baseline(query, evidence):
     return {"decision": "review", "citations": []}
 
 
-def ask_model(client, query, evidence, *, groq):
+def ask_model(client, query, evidence, *, groq, cache=None):
     payload = {"query": query, "records": [vars(record) for record in evidence]}
     choices = sorted({r.key.split("/")[1] for r in evidence
                       if r.key.startswith(("parts/", "catalog/"))})
@@ -44,14 +46,36 @@ def ask_model(client, query, evidence, *, groq):
               "required": ["decision", "citations"]}
     endpoint = ("https://api.groq.com/openai/v1/chat/completions" if groq
                 else "https://api.openai.com/v1/chat/completions")
-    response = client.post(endpoint, json={
+    request = {
         "model": GROQ_MODEL if groq else MODEL, "messages": [{"role": "system", "content": PROMPT},
                                     {"role": "user", "content": json.dumps(payload)}],
         "response_format": {"type": "json_schema", "json_schema": {
-            "name": "order_review", "strict": True, "schema": schema}}, "max_completion_tokens": 1024})
+            "name": "order_review", "strict": True, "schema": schema}}, "max_completion_tokens": 1024}
+    fingerprint = hashlib.sha256(json.dumps(request, sort_keys=True).encode()).hexdigest()
+    if cache is not None:
+        saved = cache.execute("SELECT reply, usage FROM answers WHERE fingerprint=?",
+                              (fingerprint,)).fetchone()
+        if saved:
+            return saved[0], json.loads(saved[1]), True
+    response = client.post(endpoint, json=request)
+    if groq and response.status_code == 429:
+        try:
+            wait = float(response.headers.get("Retry-After", "60"))
+        except ValueError:
+            wait = 60
+        if 0 <= wait <= 90:
+            print(f"Groq rate limit. Waiting {wait + 1:.0f}s before one retry.", flush=True)
+            time.sleep(wait + 1)
+            response = client.post(endpoint, json=request)
     response.raise_for_status()
     body = response.json()
-    return body["choices"][0]["message"]["content"], body.get("usage") or {}
+    reply = body["choices"][0]["message"]["content"]
+    usage = body.get("usage") or {}
+    if cache is not None:
+        with cache:
+            cache.execute("INSERT OR IGNORE INTO answers VALUES (?, ?, ?)",
+                          (fingerprint, reply, json.dumps(usage)))
+    return reply, usage, False
 
 
 def score(case, reply, evidence, counts):
@@ -112,7 +136,12 @@ def main():
     start = time.monotonic()
     connection = (httpx.Client(headers={"Authorization": f"Bearer {key}"}, timeout=60)
                   if online else nullcontext())
-    with connection as client:
+    cache_context = (closing(sqlite3.connect(CASES.parent / "groq-results.sqlite3"))
+                     if args.groq_free else nullcontext())
+    with connection as client, cache_context as cache:
+        if cache is not None:
+            cache.execute("CREATE TABLE IF NOT EXISTS answers "
+                          "(fingerprint TEXT PRIMARY KEY, reply TEXT, usage TEXT NOT NULL)")
         for case in cases:
             query = case["query"]
             evidence = shortlist(query, records)
@@ -129,14 +158,18 @@ def main():
                                            "environment": os.getenv("LANGSMITH_AGENT_ENVIRONMENT")})
                 with span as run:
                     try:
-                        raw, usage = ask_model(client, query, evidence, groq=args.groq_free)
+                        raw, usage, cached = ask_model(client, query, evidence, groq=args.groq_free, cache=cache)
                     except httpx.HTTPStatusError as exc:
+                        if args.groq_free and exc.response.status_code == 429:
+                            completed = counts["calls"] + counts["reused"]
+                            parser.exit(1, f"Groq quota reached after {completed}/{len(cases)} cases. "
+                                        "Rerun the same command after quota resets to resume.\n")
                         parser.exit(1, f"{model} returned HTTP {exc.response.status_code}; evaluation stopped. No fallback.\n")
                     if run is not None:
                         run.end(outputs={"reply": raw, "usage": usage})
                 if args.limit == 1:
                     print(json.dumps({"query": query, "reply": raw, "usage": usage}))
-                counts["calls"] += 1
+                counts["reused" if cached else "calls"] += 1
                 for field in ("prompt_tokens", "completion_tokens"):
                     counts[field] += usage.get(field, 0)
                 try:
