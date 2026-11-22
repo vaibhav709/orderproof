@@ -14,6 +14,7 @@ from catalog import rows
 from retrieval import shortlist, supplier_records, tokens
 
 MODEL = "gpt-6-luna"
+GROQ_MODEL = "openai/gpt-oss-120b"
 CASES = Path(__file__).parent / "evaluation" / "retrieval.csv"
 PROMPT = """Review fictional supplier enquiries. Return a JSON object with decision
 and citations (a list of supplied record IDs). Use a part code only for an explicit
@@ -33,7 +34,7 @@ def baseline(query, evidence):
     return {"decision": "review", "citations": []}
 
 
-def ask_luna(client, query, evidence):
+def ask_model(client, query, evidence, *, groq):
     payload = {"query": query, "records": [vars(record) for record in evidence]}
     choices = sorted({r.key.split("/")[1] for r in evidence
                       if r.key.startswith(("parts/", "catalog/"))})
@@ -41,8 +42,10 @@ def ask_luna(client, query, evidence):
               "properties": {"decision": {"type": "string", "enum": ["reference", "review", *choices]},
                              "citations": {"type": "array", "items": {"type": "string"}}},
               "required": ["decision", "citations"]}
-    response = client.post("https://api.openai.com/v1/chat/completions", json={
-        "model": MODEL, "messages": [{"role": "system", "content": PROMPT},
+    endpoint = ("https://api.groq.com/openai/v1/chat/completions" if groq
+                else "https://api.openai.com/v1/chat/completions")
+    response = client.post(endpoint, json={
+        "model": GROQ_MODEL if groq else MODEL, "messages": [{"role": "system", "content": PROMPT},
                                     {"role": "user", "content": json.dumps(payload)}],
         "response_format": {"type": "json_schema", "json_schema": {
             "name": "order_review", "strict": True, "schema": schema}}, "max_completion_tokens": 1024})
@@ -79,39 +82,44 @@ def score(case, reply, evidence, counts):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--live", action="store_true")
+    providers = parser.add_mutually_exclusive_group()
+    providers.add_argument("--live", action="store_true", help="Local paid Luna benchmark")
+    providers.add_argument("--groq-free", action="store_true", help="Use a Groq Free-plan organization key")
     parser.add_argument("--split", choices=["development", "evaluation", "expanded"], default="evaluation")
     parser.add_argument("--limit", type=int)
     args = parser.parse_args()
     if args.limit is not None and args.limit < 1:
         parser.error("--limit must be positive")
-    if args.live and (os.getenv("VERCEL") or os.getenv("ORDERPROOF_DEMO") == "1"):
-        parser.error("Paid evaluations are local only")
-    if args.live:
+    online = args.live or args.groq_free
+    key_var = "GROQ_API_KEY" if args.groq_free else "OPENAI_API_KEY"
+    model = GROQ_MODEL if args.groq_free else MODEL
+    if online:
         from dotenv import load_dotenv
         load_dotenv(Path(__file__).with_name(".env"))
+        if os.getenv("VERCEL") or os.getenv("ORDERPROOF_DEMO") == "1":
+            parser.error("Online benchmarks run locally only")
         if os.getenv("ORDERPROOF_CATALOG_PATH"):
             parser.error("Live benchmarks require the bundled fictional supplier data")
-        if os.getenv("OPENAI_MODEL", MODEL) != MODEL:
+        if args.live and os.getenv("OPENAI_MODEL", MODEL) != MODEL:
             parser.error(f"Only {MODEL} is enabled for paid evaluations")
-    key = os.getenv("OPENAI_API_KEY")
-    if args.live and not key:
-        parser.error("Live evaluation requires OPENAI_API_KEY in the local environment")
+        if not os.getenv(key_var):
+            parser.error(f"This benchmark requires {key_var}")
+    key = os.getenv(key_var) if online else None
     with CASES.open(newline="") as source:
         cases = [row for row in csv.DictReader(source) if row["split"] == args.split][:args.limit]
     records = supplier_records()
     counts = Counter(correct_with_evidence=0, wrong_part_suggestions=0, unnecessary_reviews=0, calls=0)
     start = time.monotonic()
     connection = (httpx.Client(headers={"Authorization": f"Bearer {key}"}, timeout=60)
-                  if args.live else nullcontext())
+                  if online else nullcontext())
     with connection as client:
         for case in cases:
             query = case["query"]
             evidence = shortlist(query, records)
             reply = baseline(query, evidence)
-            if args.live:
+            if online:
                 span = nullcontext()
-                if os.getenv("LANGSMITH_TRACING", "").lower() == "true":
+                if args.live and os.getenv("LANGSMITH_TRACING", "").lower() == "true":
                     from langsmith import trace
                     span = trace("OrderProof part review", run_type="llm",
                                  project_name=os.getenv("LANGSMITH_PROJECT") or "OrderProof",
@@ -120,7 +128,10 @@ def main():
                                            "agent_id": os.getenv("LANGSMITH_AGENT_ID"),
                                            "environment": os.getenv("LANGSMITH_AGENT_ENVIRONMENT")})
                 with span as run:
-                    raw, usage = ask_luna(client, query, evidence)
+                    try:
+                        raw, usage = ask_model(client, query, evidence, groq=args.groq_free)
+                    except httpx.HTTPStatusError as exc:
+                        parser.exit(1, f"{model} returned HTTP {exc.response.status_code}; evaluation stopped. No fallback.\n")
                     if run is not None:
                         run.end(outputs={"reply": raw, "usage": usage})
                 if args.limit == 1:
@@ -134,10 +145,10 @@ def main():
                     reply = None
             previous_correct = counts["correct_with_evidence"]
             score(case, reply, evidence, counts)
-            if args.live and counts["correct_with_evidence"] == previous_correct:
+            if online and counts["correct_with_evidence"] == previous_correct:
                 print(json.dumps({"miss": query, "expected": case["decision"], "reply": reply,
                                   "retrieved": [record.key for record in evidence]}))
-    print(json.dumps({"method": MODEL if args.live else "exact-code baseline",
+    print(json.dumps({"method": model if online else "exact-code baseline",
                       "split": args.split, "cases": len(cases), **counts,
                       "seconds": round(time.monotonic() - start, 2)}, indent=2))
 
