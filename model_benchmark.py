@@ -73,6 +73,20 @@ def ask_model(client, query, evidence, *, model, cache=None):
             print(f"Groq rate limit. Waiting {wait + 1:.0f}s before one retry.", flush=True)
             time.sleep(wait + 1)
             response = client.post(endpoint, json=request)
+    if model == GEMINI_MODEL:
+        for delay in (3, 10):
+            if response.status_code != 503:
+                break
+            try:
+                wait = max(delay, float(response.headers.get("Retry-After", "0")))
+            except ValueError:
+                # Leave non-numeric retry instructions to a later manual run.
+                break
+            if wait > 60:
+                break
+            print(f"Gemini temporarily unavailable. Retrying in {wait:g}s.", flush=True)
+            time.sleep(wait)
+            response = client.post(endpoint, json=request)
     response.raise_for_status()
     body = response.json()
     reply = body["choices"][0]["message"]["content"]
@@ -178,6 +192,10 @@ def main():
                             completed = counts["calls"] + counts["reused"]
                             parser.exit(1, f"{model} quota reached after {completed}/{len(cases)} cases. "
                                         "Rerun the same command after quota resets to resume.\n")
+                        if args.gemini_free and exc.response.status_code == 503:
+                            completed = counts["calls"] + counts["reused"]
+                            parser.exit(1, f"Gemini temporarily unavailable (503). {completed}/{len(cases)} "
+                                        f"{args.split} cases completed. Rerun later to resume.\n")
                         if args.gemini_free and exc.response.status_code == 404:
                             # Classify the diagnostic without printing arbitrary provider text.
                             reason = exc.response.text.lower()

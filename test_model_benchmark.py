@@ -1,5 +1,6 @@
 import unittest
 from collections import Counter
+from unittest.mock import patch
 
 import httpx
 
@@ -19,6 +20,25 @@ class BenchmarkTests(unittest.TestCase):
             with self.assertRaises(httpx.HTTPStatusError):
                 ask_model(client, "Quote SK-40A", [], model=GEMINI_MODEL)
         self.assertEqual([r.url.host for r in requests], ["generativelanguage.googleapis.com"])
+
+    @patch("model_benchmark.time.sleep")
+    def test_gemini_outage_retries_are_bounded(self, sleep):
+        for final_status in (200, 503):
+            statuses = iter([503, 503, final_status])
+
+            def respond(request):
+                self.assertEqual(request.url.host, "generativelanguage.googleapis.com")
+                return httpx.Response(next(statuses), json={"choices": [{"message": {"content": "{}"}}]})
+
+            with httpx.Client(transport=httpx.MockTransport(respond)) as client:
+                if final_status == 503:
+                    with self.assertRaises(httpx.HTTPStatusError):
+                        ask_model(client, "Quote SK-40A", [], model=GEMINI_MODEL)
+                else:
+                    raw, _, _ = ask_model(client, "Quote SK-40A", [], model=GEMINI_MODEL)
+                    self.assertEqual(raw, "{}")
+            self.assertEqual(sleep.call_count, 2)
+            sleep.reset_mock()
 
     def test_serial_answer_needs_both_sources(self):
         case = {"decision": "SK-40B", "required": "bulletin/SB-040 parts/SK-40B"}
