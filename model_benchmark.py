@@ -16,7 +16,7 @@ from catalog import rows
 from retrieval import shortlist, supplier_records, tokens
 
 MODEL = "gpt-6-luna"
-GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_MODEL = "gemini-3.5-flash-lite"
 GROQ_MODEL = "openai/gpt-oss-120b"
 CASES = Path(__file__).parent / "evaluation" / "retrieval.csv"
 PROMPT = """Review fictional supplier enquiries. Return a JSON object with decision
@@ -178,6 +178,15 @@ def main():
                             completed = counts["calls"] + counts["reused"]
                             parser.exit(1, f"{model} quota reached after {completed}/{len(cases)} cases. "
                                         "Rerun the same command after quota resets to resume.\n")
+                        if args.gemini_free and exc.response.status_code == 404:
+                            # Classify the diagnostic without printing arbitrary provider text.
+                            reason = exc.response.text.lower()
+                            detail = ("Google reports a model availability issue."
+                                      if "model" in reason and any(term in reason for term in
+                                          ("not found", "not_found", "not available", "no longer", "not supported"))
+                                      else "Google did not identify the missing resource.")
+                            parser.exit(1, f"{model} returned HTTP 404. {detail} "
+                                        "Check model access in this key's AI Studio project.\n")
                         parser.exit(1, f"{model} returned HTTP {exc.response.status_code}; evaluation stopped. No fallback.\n")
                     if run is not None:
                         run.end(outputs={"reply": raw, "usage": usage})
