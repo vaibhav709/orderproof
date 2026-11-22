@@ -16,6 +16,7 @@ from catalog import rows
 from retrieval import shortlist, supplier_records, tokens
 
 MODEL = "gpt-6-luna"
+GEMINI_MODEL = "gemini-2.5-flash"
 GROQ_MODEL = "openai/gpt-oss-120b"
 CASES = Path(__file__).parent / "evaluation" / "retrieval.csv"
 PROMPT = """Review fictional supplier enquiries. Return a JSON object with decision
@@ -36,7 +37,7 @@ def baseline(query, evidence):
     return {"decision": "review", "citations": []}
 
 
-def ask_model(client, query, evidence, *, groq, cache=None):
+def ask_model(client, query, evidence, *, model, cache=None):
     payload = {"query": query, "records": [vars(record) for record in evidence]}
     choices = sorted({r.key.split("/")[1] for r in evidence
                       if r.key.startswith(("parts/", "catalog/"))})
@@ -44,13 +45,18 @@ def ask_model(client, query, evidence, *, groq, cache=None):
               "properties": {"decision": {"type": "string", "enum": ["reference", "review", *choices]},
                              "citations": {"type": "array", "items": {"type": "string"}}},
               "required": ["decision", "citations"]}
-    endpoint = ("https://api.groq.com/openai/v1/chat/completions" if groq
-                else "https://api.openai.com/v1/chat/completions")
+    endpoint = {
+        MODEL: "https://api.openai.com/v1/chat/completions",
+        GROQ_MODEL: "https://api.groq.com/openai/v1/chat/completions",
+        GEMINI_MODEL: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+    }[model]
     request = {
-        "model": GROQ_MODEL if groq else MODEL, "messages": [{"role": "system", "content": PROMPT},
+        "model": model, "messages": [{"role": "system", "content": PROMPT},
                                     {"role": "user", "content": json.dumps(payload)}],
         "response_format": {"type": "json_schema", "json_schema": {
             "name": "order_review", "strict": True, "schema": schema}}, "max_completion_tokens": 1024}
+    if model == GEMINI_MODEL:
+        request["max_tokens"] = request.pop("max_completion_tokens")
     fingerprint = hashlib.sha256(json.dumps(request, sort_keys=True).encode()).hexdigest()
     if cache is not None:
         saved = cache.execute("SELECT reply, usage FROM answers WHERE fingerprint=?",
@@ -58,7 +64,7 @@ def ask_model(client, query, evidence, *, groq, cache=None):
         if saved:
             return saved[0], json.loads(saved[1]), True
     response = client.post(endpoint, json=request)
-    if groq and response.status_code == 429:
+    if model == GROQ_MODEL and response.status_code == 429:
         try:
             wait = float(response.headers.get("Retry-After", "60"))
         except ValueError:
@@ -109,14 +115,19 @@ def main():
     providers = parser.add_mutually_exclusive_group()
     providers.add_argument("--live", action="store_true", help="Local paid Luna benchmark")
     providers.add_argument("--groq-free", action="store_true", help="Use a Groq Free-plan organization key")
+    providers.add_argument("--gemini-free", action="store_true", help="Use an unbilled Gemini project key")
     parser.add_argument("--split", choices=["development", "evaluation", "expanded"], default="evaluation")
     parser.add_argument("--limit", type=int)
     args = parser.parse_args()
     if args.limit is not None and args.limit < 1:
         parser.error("--limit must be positive")
-    online = args.live or args.groq_free
-    key_var = "GROQ_API_KEY" if args.groq_free else "OPENAI_API_KEY"
-    model = GROQ_MODEL if args.groq_free else MODEL
+    online = args.live or args.groq_free or args.gemini_free
+    if args.gemini_free:
+        model, key_var = GEMINI_MODEL, "GEMINI_API_KEY"
+    elif args.groq_free:
+        model, key_var = GROQ_MODEL, "GROQ_API_KEY"
+    else:
+        model, key_var = MODEL, "OPENAI_API_KEY"
     if online:
         from dotenv import load_dotenv
         load_dotenv(Path(__file__).with_name(".env"))
@@ -136,8 +147,9 @@ def main():
     start = time.monotonic()
     connection = (httpx.Client(headers={"Authorization": f"Bearer {key}"}, timeout=60)
                   if online else nullcontext())
-    cache_context = (closing(sqlite3.connect(CASES.parent / "groq-results.sqlite3"))
-                     if args.groq_free else nullcontext())
+    cache_file = "gemini-results.sqlite3" if args.gemini_free else "groq-results.sqlite3"
+    cache_context = (closing(sqlite3.connect(CASES.parent / cache_file))
+                     if args.groq_free or args.gemini_free else nullcontext())
     with connection as client, cache_context as cache:
         if cache is not None:
             cache.execute("CREATE TABLE IF NOT EXISTS answers "
@@ -158,11 +170,13 @@ def main():
                                            "environment": os.getenv("LANGSMITH_AGENT_ENVIRONMENT")})
                 with span as run:
                     try:
-                        raw, usage, cached = ask_model(client, query, evidence, groq=args.groq_free, cache=cache)
+                        raw, usage, cached = ask_model(client, query, evidence, model=model, cache=cache)
+                    except httpx.RequestError as exc:
+                        parser.exit(1, f"{model} connection failed ({type(exc).__name__}). Rerun to resume.\n")
                     except httpx.HTTPStatusError as exc:
-                        if args.groq_free and exc.response.status_code == 429:
+                        if (args.groq_free or args.gemini_free) and exc.response.status_code == 429:
                             completed = counts["calls"] + counts["reused"]
-                            parser.exit(1, f"Groq quota reached after {completed}/{len(cases)} cases. "
+                            parser.exit(1, f"{model} quota reached after {completed}/{len(cases)} cases. "
                                         "Rerun the same command after quota resets to resume.\n")
                         parser.exit(1, f"{model} returned HTTP {exc.response.status_code}; evaluation stopped. No fallback.\n")
                     if run is not None:

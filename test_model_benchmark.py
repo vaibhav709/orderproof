@@ -1,11 +1,25 @@
 import unittest
 from collections import Counter
 
-from model_benchmark import score
+import httpx
+
+from model_benchmark import GEMINI_MODEL, ask_model, score
 from retrieval import Record
 
 
 class BenchmarkTests(unittest.TestCase):
+    def test_gemini_quota_stops_at_google(self):
+        requests = []
+
+        def limited(request):
+            requests.append(request)
+            return httpx.Response(429)
+
+        with httpx.Client(transport=httpx.MockTransport(limited)) as client:
+            with self.assertRaises(httpx.HTTPStatusError):
+                ask_model(client, "Quote SK-40A", [], model=GEMINI_MODEL)
+        self.assertEqual([r.url.host for r in requests], ["generativelanguage.googleapis.com"])
+
     def test_serial_answer_needs_both_sources(self):
         case = {"decision": "SK-40B", "required": "bulletin/SB-040 parts/SK-40B"}
         evidence = [Record(key, "") for key in case["required"].split()]
